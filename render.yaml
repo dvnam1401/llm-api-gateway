@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: llm-gateway
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn gateway.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEYS
+        sync: false
+      - key: GATEWAY_SECRET
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: llm-gateway-redis
+          type: redis
+          property: connectionString
+      - key: REQUEST_TIMEOUT
+        value: "60"
+      - key: CIRCUIT_BREAKER_THRESHOLD
+        value: "3"
+      - key: CIRCUIT_BREAKER_COOLDOWN
+        value: "300"
+
+  - type: redis
+    name: llm-gateway-redis
+    plan: free
