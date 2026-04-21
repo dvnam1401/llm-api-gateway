@@ -16,11 +16,17 @@ class ApiKey:
 
 
 def load_api_keys() -> list[ApiKey]:
-    """Scan env vars with prefix GROQ_API_KEY_, return sorted by suffix."""
+    """Scan env vars with prefix GROQ_API_KEY_, return sorted by suffix.
+
+    Only keys that look like real Groq keys (``gsk_`` prefix, >= 20 chars)
+    are loaded; placeholder values are silently skipped.
+    """
     prefix = "GROQ_API_KEY_"
     keys: list[ApiKey] = []
     for name, value in os.environ.items():
         if name.startswith(prefix) and value:
+            if not value.startswith("gsk_") or len(value) < 20:
+                continue
             suffix = name[len(prefix):]
             keys.append(ApiKey(suffix=suffix, key=value))
     keys.sort(key=lambda k: k.suffix)
@@ -32,6 +38,7 @@ REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
 REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", "60"))
 CIRCUIT_BREAKER_THRESHOLD: int = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "3"))
 CIRCUIT_BREAKER_COOLDOWN: int = int(os.getenv("CIRCUIT_BREAKER_COOLDOWN", "300"))
+HEALTH_PROBE_INTERVAL: int = int(os.getenv("HEALTH_PROBE_INTERVAL", "1800"))
 
 MODEL: str = "qwen/qwen3-32b"
 GROQ_API_BASE: str = "https://api.groq.com/openai/v1"

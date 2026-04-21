@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -10,7 +11,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 
-from gateway.config import GATEWAY_SECRET, REDIS_URL
+from gateway.config import GATEWAY_SECRET, HEALTH_PROBE_INTERVAL, REDIS_URL
 from gateway.key_manager import KeyManager, NoHealthyKeyError
 from gateway.proxy import UpstreamError, forward_request
 
@@ -36,6 +37,42 @@ class State:
 state = State()
 
 
+# ── Health probe background task ───────────────────────────────────
+
+async def _health_probe_loop() -> None:
+    """Periodically probe circuit-open keys and recover them if Groq responds OK."""
+    await asyncio.sleep(5)
+
+    # Startup recovery: reset stale circuit states, then probe immediately
+    try:
+        reset_count = await state.key_manager.reset_all_circuits()
+        logger.info("STARTUP_RECOVERY  reset %d circuit keys", reset_count)
+
+        result = await state.key_manager.probe_and_recover(state.http_client)
+        logger.info(
+            "STARTUP_PROBE  recovered=%s still_open=%s",
+            result["recovered"],
+            result["still_open"],
+        )
+    except Exception:
+        logger.exception("Startup recovery failed")
+
+    while True:
+        await asyncio.sleep(HEALTH_PROBE_INTERVAL)
+        try:
+            result = await state.key_manager.probe_and_recover(
+                state.http_client
+            )
+            if result["recovered"]:
+                logger.info("PROBE_RECOVERED  keys=%s", result["recovered"])
+            if result["still_open"]:
+                logger.warning(
+                    "PROBE_STILL_OPEN  keys=%s", result["still_open"]
+                )
+        except Exception:
+            logger.exception("Health probe error")
+
+
 # ── Lifespan ───────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -49,8 +86,15 @@ async def lifespan(app: FastAPI):
     if key_count == 0:
         logger.warning("No GROQ_API_KEY_* env vars found!")
 
+    probe_task = asyncio.create_task(_health_probe_loop())
+
     yield
 
+    probe_task.cancel()
+    try:
+        await probe_task
+    except asyncio.CancelledError:
+        pass
     await state.http_client.aclose()
     await state.redis_client.aclose()
     logger.info("Gateway shut down")
