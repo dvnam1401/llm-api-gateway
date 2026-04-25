@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from gateway.config import GATEWAY_SECRET, HEALTH_PROBE_INTERVAL, REDIS_URL
@@ -101,6 +102,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LLM API Gateway", lifespan=lifespan)
+
+# ── CORS ───────────────────────────────────────────────────────────
+# /health là public endpoint — cho phép browser từ bất kỳ origin gọi tới.
+# /v1/chat/completions vẫn được bảo vệ riêng bởi Bearer token auth.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 # ── Auth helper ────────────────────────────────────────────────────
